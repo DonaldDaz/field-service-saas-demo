@@ -1,0 +1,81 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: fieldflow
+      POSTGRES_USER: fieldflow
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Copy .env.example to .env}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fieldflow -d fieldflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.2
+    command: ["start-dev", "--hostname=http://localhost:8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Copy .env.example to .env}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+
+  keycloak-setup:
+    image: quay.io/keycloak/keycloak:26.5.2
+    entrypoint: ["/bin/bash", "/opt/fieldflow/seed.sh"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Copy .env.example to .env}
+      CUSTOMER_PASSWORD: ${CUSTOMER_PASSWORD:?Copy .env.example to .env}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:?Copy .env.example to .env}
+      TECHNICIAN_PASSWORD: ${TECHNICIAN_PASSWORD:?Copy .env.example to .env}
+    volumes:
+      - ./infra/keycloak/seed.sh:/opt/fieldflow/seed.sh:ro
+    depends_on:
+      - keycloak
+
+  api:
+    build: ./api
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/fieldflow
+      DB_USER: fieldflow
+      DB_PASSWORD: ${DB_PASSWORD:?Copy .env.example to .env}
+      OIDC_ISSUER: http://localhost:8080/realms/fieldflow
+      OIDC_JWKS_URI: http://keycloak:8080/realms/fieldflow/protocol/openid-connect/certs
+      PORTAL_URL: http://localhost:3000
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak-setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  portal:
+    build:
+      context: ./portal
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8081
+        NEXT_PUBLIC_OIDC_AUTHORITY: http://localhost:8080/realms/fieldflow
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  keycloak_data:

@@ -1,0 +1,13 @@
+.env
+.DS_Store
+api/target/
+portal/node_modules/
+portal/.next/
+portal/playwright-report/
+portal/test-results/
+technician/node_modules/
+technician/.expo/
+technician/dist/
+technician/.env
+*.log
+*.tsbuildinfo
